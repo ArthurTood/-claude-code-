@@ -206,6 +206,42 @@ describe("permission bubble stack layout", () => {
     ]);
   });
 
+  it("places bubble above workArea to merge with notch when hasNotch is true", () => {
+    // Simulate a MacBook with workArea.y = 32 (menu bar + notch)
+    const macWa = { x: 0, y: 32, width: 1920, height: 1040 };
+    const bounds = layout({
+      followPet: true,
+      preferTopDock: true,
+      notchInset: 32,
+      hasNotch: true,
+      bubbleHeights: [180, 180],
+      workArea: macWa,
+      hitRect: { left: 800, top: 900, right: 920, bottom: 1000 },
+    });
+
+    // Window top edge at wa.y - notchInset = 32 - 32 = 0 (screen top)
+    assert.strictEqual(bounds[0].y, 0);
+    assert.strictEqual(bounds[0].x, 790);
+    assert.strictEqual(bounds[1].y, 186);
+  });
+
+  it("keeps bubble below menu bar when hasNotch is false even with notchInset", () => {
+    // Non-notch Mac: notchInset = 25 but hasNotch = false
+    const macWa = { x: 0, y: 25, width: 1920, height: 1047 };
+    const bounds = layout({
+      followPet: true,
+      preferTopDock: true,
+      notchInset: 25,
+      hasNotch: false,
+      bubbleHeights: [180],
+      workArea: macWa,
+      hitRect: { left: 800, top: 900, right: 920, bottom: 1000 },
+    });
+
+    // Without notch, stays below menu bar: wa.y + margin = 25 + 8 = 33
+    assert.strictEqual(bounds[0].y, 33);
+  });
+
   it("falls back to the legacy pet-side layout when the top stack would overflow", () => {
     const bounds = layout({
       followPet: true,

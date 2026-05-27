@@ -79,6 +79,10 @@ html, body {
 }
 body { padding: 6px; }
 
+/* Top-dock (Dynamic Island) mode: remove body padding so the card extends
+   flush to the window edges — critical for notch visual merging. */
+body.island-mode { padding: 0; }
+
 .card {
   position: relative;
   background: var(--card-bg);
@@ -102,18 +106,31 @@ body { padding: 6px; }
   will-change: transform, opacity;
 }
 
-/* macOS 顶部态：灵动岛参考风格。
-   纯黑哑光胶囊 + 顶部 specular + 多层柔和 halo + 缓慢呼吸光，
-   去掉了之前流动的彩条渐变，更接近 iOS Dynamic Island 的克制质感。 */
+/* macOS 顶部态：真正的 Dynamic Island 交互。
+   三态模型：
+   1. 空闲 — 无显示
+   2. compact（消息到达）— 窄胶囊（~notch-width），居中在刘海正下方，
+      只显示 header（tool pill + agent badge），视觉上像从刘海两侧弹出
+   3. expanded（hover）— 宽度展开到 340px，向下展开完整内容 + 按钮
+
+   --notch-inset: 刘海+菜单栏高度（~32px），card 用它做 padding-top 把
+   内容推到刘海下方，同时深色背景延伸到窗口顶边与刘海视觉融合。
+   --notch-width: 刘海宽度（~200px），compact 态卡片宽度匹配此值。 */
 .card[data-top-dock="true"] {
   --tone-a: rgba(96, 165, 250, 0.34);
   --tone-b: rgba(45, 212, 191, 0.22);
   --tone-c: rgba(168, 85, 247, 0.18);
   --island-radius-expanded: 28px;
   --island-radius-compact: 22px;
+  --notch-inset: 0px;
+  --notch-width: 200px;
+  --island-width-expanded: 308px;
+  --island-width-compact: 200px;
   border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: var(--island-radius-expanded);
-  padding: 12px 16px 12px;
+  padding: var(--notch-inset) 16px 12px;
+  width: var(--island-width-expanded);
+  margin: 0 auto;
   background:
     radial-gradient(140% 70% at 50% -10%, rgba(255, 255, 255, 0.09), transparent 55%),
     linear-gradient(180deg, rgba(18, 18, 20, 0.985), rgba(6, 6, 8, 0.985));
@@ -129,11 +146,17 @@ body { padding: 6px; }
   backdrop-filter: blur(22px) saturate(140%);
   -webkit-backdrop-filter: blur(22px) saturate(140%);
   animation: islandBreathe 4.6s ease-in-out infinite;
+  transition:
+    width 0.42s var(--ease-spring),
+    border-radius 0.42s var(--ease-spring),
+    padding 0.42s var(--ease-spring),
+    box-shadow 0.42s var(--ease-out-soft);
 }
 
 .card[data-top-dock="true"][data-island-mode="compact"] {
-  gap: 4px;
-  padding-top: 10px;
+  gap: 6px;
+  width: var(--island-width-compact);
+  padding-top: var(--notch-inset);
   padding-bottom: 10px;
   padding-left: 14px;
   padding-right: 14px;
@@ -141,6 +164,23 @@ body { padding: 6px; }
   border-color: rgba(255, 255, 255, 0.07);
   /* compact 态光晕收敛、更聚焦，类似 DI 在等待 → 提示态的高亮节拍 */
   animation: islandBreatheCompact 3.2s ease-in-out infinite;
+}
+
+/* When a physical notch is detected, the card extends into the notch area.
+   Flat top corners let the dark background reach the window top edge without
+   transparent gaps from rounded corners. The physical notch covers the card's
+   absolute top, so the flat edge is invisible. */
+.card[data-top-dock="true"][data-has-notch="true"] {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.card[data-top-dock="true"][data-has-notch="true"][data-island-mode="compact"] {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.card[data-top-dock="true"][data-has-notch="true"]::before {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 .card[data-top-dock="true"][data-island-mode="compact"]::before {
@@ -151,12 +191,12 @@ body { padding: 6px; }
   opacity: 1;
 }
 
-.card[data-top-dock="true"]::before {
-  content: "";
+.card[data-top-dock=”true”]::before {
+  content: “”;
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  /* 顶部 specular 高光（DI 的“湿润”关键），叠一层极弱的 tone wash 给身份色一点呼应。
+  /* 顶部 specular 高光（DI 的”湿润”关键），叠一层极弱的 tone wash 给身份色一点呼应。
      不再做横向流动渐变。 */
   background:
     radial-gradient(60% 36% at 50% 0%, rgba(255, 255, 255, 0.16), transparent 70%),
@@ -169,7 +209,7 @@ body { padding: 6px; }
 .card[data-top-dock="true"]::after {
   content: "";
   position: absolute;
-  top: 0;
+  top: var(--notch-inset);
   left: 22%;
   right: 22%;
   height: 1px;
@@ -179,8 +219,8 @@ body { padding: 6px; }
 }
 
 .card[data-top-dock="true"][data-island-mode="compact"]::after {
-  left: 32%;
-  right: 32%;
+  left: 22%;
+  right: 22%;
   opacity: 0.7;
 }
 
@@ -302,7 +342,9 @@ body { padding: 6px; }
     opacity 0.26s var(--ease-out-quint),
     transform 0.52s var(--ease-spring),
     border-radius 0.42s var(--ease-spring),
-    padding 0.42s var(--ease-spring);
+    padding 0.42s var(--ease-spring),
+    width 0.42s var(--ease-spring),
+    box-shadow 0.42s var(--ease-out-soft);
 }
 
 .card[data-top-dock="true"].visible {
@@ -387,6 +429,42 @@ body { padding: 6px; }
 .card[data-top-dock="true"][data-island-mode="compact"] .agent-badge {
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.94);
+}
+
+/* compact 态隐藏 meta-row，header 自身就是信息行 */
+.card[data-top-dock="true"][data-island-mode="compact"] .meta-row {
+  opacity: 0;
+  max-height: 0;
+  margin: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity 0.2s var(--ease-out-soft), max-height 0.3s var(--ease-out-quint);
+}
+
+/* compact 摘要行：在 header 和 command-block 之间显示一行文字摘要 */
+.compact-summary {
+  display: none;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+  max-height: 0;
+  opacity: 0;
+  transition: opacity 0.22s var(--ease-out-soft), max-height 0.3s var(--ease-out-quint);
+}
+
+.card[data-top-dock="true"][data-island-mode="compact"] .compact-summary {
+  display: block;
+  max-height: 14px;
+  opacity: 1;
+}
+
+.card[data-top-dock="true"][data-island-mode="expanded"] .compact-summary {
+  display: block;
+  max-height: 0;
+  opacity: 0;
 }
 
 .agent-badge {
@@ -822,6 +900,7 @@ body { padding: 6px; }
     <div class="session-tag" id="sessionTag"></div>
   </div>
 
+  <div class="compact-summary" id="compactSummary"></div>
   <div class="command-block" id="commandBlock"></div>
   <div class="elicitation-form" id="elicitationForm"></div>
   
@@ -837,6 +916,7 @@ body { padding: 6px; }
 const card = document.getElementById("card");
 const toolPill = document.getElementById("toolPill");
 const commandBlock = document.getElementById("commandBlock");
+const compactSummary = document.getElementById("compactSummary");
 const elicitationForm = document.getElementById("elicitationForm");
 const btnAllow = document.getElementById("btnAllow");
 const btnDeny = document.getElementById("btnDeny");
@@ -852,10 +932,18 @@ let islandMode = "expanded";
 let islandExpandedAt = 0;
 const ISLAND_CLICK_GUARD_MS = 450;
 
+let _heightReportTimer = null;
 function reportBubbleHeight() {
   requestAnimationFrame(() => {
-    window.bubbleAPI.reportHeight(card.offsetHeight + 12);
+    // In island mode, body padding is 0 so no extra offset. Otherwise,
+    // body padding is 6px on all sides = 12px total vertical offset.
+    const extra = document.body.classList.contains("island-mode") ? 0 : 12;
+    window.bubbleAPI.reportHeight(card.offsetHeight + extra);
   });
+}
+function reportBubbleHeightDebounced() {
+  if (_heightReportTimer) clearTimeout(_heightReportTimer);
+  _heightReportTimer = setTimeout(reportBubbleHeight, 60);
 }
 
 function setIslandMode(mode) {
@@ -863,6 +951,12 @@ function setIslandMode(mode) {
   card.setAttribute("data-island-mode", mode);
   if (mode === "expanded") islandExpandedAt = Date.now();
   reportBubbleHeight();
+  // CSS max-height transition for expanded content takes ~420ms.
+  // Report again after the transition settles so the window resizes
+  // to fit the full expanded content (buttons included).
+  if (mode === "expanded") {
+    setTimeout(reportBubbleHeightDebounced, 480);
+  }
 }
 
 function syncIslandMode() {
@@ -1038,14 +1132,17 @@ function revealCard() {
   card.classList.remove("hiding");
   card.classList.add("visible");
   reportBubbleHeight();
+  setTimeout(reportBubbleHeightDebounced, 500);
 }
 
 function resetBubbleContent() {
   elicitationMode = false;
   elicitationQuestions = [];
   shouldUseIslandExpand = false;
+  document.body.classList.remove("island-mode");
   commandBlock.style.display = "";
   commandBlock.textContent = "";
+  compactSummary.textContent = "";
   elicitationForm.innerHTML = "";
   elicitationForm.classList.remove("visible");
   toolPill.style.display = "";
@@ -1055,6 +1152,10 @@ function resetBubbleContent() {
   btnDeny.disabled = false;
   suggestionsContainer.innerHTML = "";
   card.setAttribute("data-island-mode", "expanded");
+  card.setAttribute("data-has-notch", "false");
+  card.style.removeProperty("--notch-inset");
+  card.style.removeProperty("--notch-width");
+  card.style.removeProperty("--island-width-compact");
 }
 
 function isQuestionAnswered(questionCard) {
@@ -1165,10 +1266,31 @@ function show(data) {
   currentLang = data.lang || "en";
   elicitationMode = data.isElicitation || false;
   card.setAttribute("data-top-dock", data.useTopDockChrome ? "true" : "false");
+  // Toggle body padding: top-dock mode needs the card flush against window edges
+  // so its dark background extends behind the notch area.
+  document.body.classList.toggle("island-mode", !!data.useTopDockChrome);
   setBubbleKind(data);
   setAgentBadge(data.agentId);
   setSessionTag(data);
   shouldUseIslandExpand = !!(data.useTopDockChrome && !data.isElicitation);
+  // Mark whether a physical notch was detected — used by CSS to apply flat
+  // top corners when the card extends behind the notch area.
+  card.setAttribute("data-has-notch", data.hasNotch ? "true" : "false");
+  // Inject notch geometry so the card's top padding pushes content below the
+  // physical notch, while the dark background extends all the way to the top.
+  // Compact-state width matches the notch width so the pill looks like it
+  // flanks the notch from both sides.
+  if (data.useTopDockChrome && typeof data.notchInset === "number" && data.notchInset > 0) {
+    card.style.setProperty("--notch-inset", data.notchInset + "px");
+    if (typeof data.notchWidth === "number" && data.notchWidth > 0) {
+      card.style.setProperty("--notch-width", data.notchWidth + "px");
+      card.style.setProperty("--island-width-compact", data.notchWidth + "px");
+    }
+  } else {
+    card.style.removeProperty("--notch-inset");
+    card.style.removeProperty("--notch-width");
+    card.style.removeProperty("--island-width-compact");
+  }
   syncIslandMode();
 
   // opencode branch — Phase 2. Three differences from CC:
@@ -1204,6 +1326,7 @@ function show(data) {
       try { detail = JSON.stringify(input); } catch { detail = "(n/a)"; }
     }
     commandBlock.textContent = truncate(detail, 200);
+    compactSummary.textContent = truncate(detail, 60);
 
     btnAllow.textContent = bubbleText(data.lang, "allow");
     btnDeny.textContent = bubbleText(data.lang, "deny");
@@ -1254,6 +1377,7 @@ function show(data) {
     toolPill.setAttribute("data-tool", "CodexExec");
     toolPill.style.display = "none";
     commandBlock.textContent = (data.toolInput && data.toolInput.command) || "(unknown)";
+    compactSummary.textContent = (data.toolInput && data.toolInput.command) || "(unknown)";
     btnAllow.textContent = bubbleText(data.lang, "gotIt");
     btnAllow.disabled = false;
     btnDeny.style.display = "none";
@@ -1276,7 +1400,9 @@ function show(data) {
   toolPill.setAttribute("data-tool", data.toolName || "");
 
   // Command block (textContent only — never innerHTML)
-  commandBlock.textContent = formatDetail(data.toolName, data.toolInput);
+  const detail = formatDetail(data.toolName, data.toolInput);
+  commandBlock.textContent = detail;
+  compactSummary.textContent = truncate(detail, 60);
 
   // Button labels
   btnAllow.textContent = isPlanReview ? bubbleText(data.lang, "approve") : bubbleText(data.lang, "allow");
@@ -1332,6 +1458,7 @@ card.addEventListener("mouseenter", () => {
 card.addEventListener("mouseleave", () => {
   if (!shouldUseIslandExpand) return;
   setIslandMode("compact");
+  reportBubbleHeightDebounced();
 });
 
 btnAllow.addEventListener("click", () => {

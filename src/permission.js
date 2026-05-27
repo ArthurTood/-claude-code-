@@ -15,6 +15,14 @@ const isLinux = process.platform === "linux";
 const isWin = process.platform === "win32";
 const { execFile } = require("child_process");
 
+// MacBook notch width (Apple HIG: ~200px at native resolution).
+// Used by the bubble renderer to size the compact-state pill to match
+// the notch, creating the visual illusion of content flanking the notch.
+const NOTCH_WIDTH = 200;
+// Threshold for detecting a notch display: workArea.y >= this value
+// means the top inset includes a notch (non-notch Macs have ~25px menu bar).
+const NOTCH_INSET_THRESHOLD = 30;
+
 function captureFrontApp(cb) {
   if (!isMac) { cb(null); return; }
   execFile("osascript", ["-e",
@@ -96,6 +104,8 @@ function computeBubbleStackLayout({
   gap,
   workArea: wa,
   hitRect,
+  notchInset = 0,
+  hasNotch = false,
 }) {
   const N = bubbleHeights.length;
   const bounds = new Array(N);
@@ -112,9 +122,15 @@ function computeBubbleStackLayout({
   }
 
   let x, yBottom;
-  // macOS + bubbleFollowPet: 优先进入“顶部刘海融合态”。
+  // macOS + bubbleFollowPet: 优先进入”顶部刘海融合态”。
   // 这里只做视觉吸附，不依赖系统私有异形窗口能力；一旦顶部空间不够，
   // 立即回退到既有的 pet below/side/corner 布局，避免权限气泡卡死。
+  //
+  // On notch MacBooks (hasNotch=true), the window top is placed at the
+  // screen top (y=0, i.e. wa.y - notchInset) so the dark card background
+  // extends behind the notch. The card's --notch-inset padding pushes
+  // content below the notch. On non-notch Macs, the bubble sits just
+  // below the menu bar (wa.y + margin).
   if (preferTopDock) {
     const topX = Math.max(
       wa.x + margin,
@@ -123,7 +139,7 @@ function computeBubbleStackLayout({
         wa.x + wa.width - bw - margin
       )
     );
-    const topStart = wa.y + margin;
+    const topStart = hasNotch ? wa.y - notchInset : wa.y + margin;
     const topLimit = wa.y + wa.height - margin;
     if (topStart + totalH <= topLimit) {
       x = topX;
@@ -358,9 +374,35 @@ const unsubscribeShortcuts = typeof ctx.subscribeShortcuts === "function"
   ? ctx.subscribeShortcuts(() => syncPermissionShortcuts())
   : null;
 
+// Most recently computed notch inset (px) — cached so showPermissionBubble
+// can include it in the permission-show IPC payload without re-querying
+// the display. Updated each time repositionBubbles() runs.
+let _currentNotchInset = 0;
+let _currentHasNotch = false;
+
 // Fallback height before renderer reports actual measurement
 function estimateBubbleHeight(sugCount) {
   return 200 + (sugCount || 0) * 37;
+}
+
+function detectNotch() {
+  // Detect notch on any MacBook, independent of bubbleFollowPet.
+  // Returns { notchInset, hasNotch }.
+  if (!isMac || typeof ctx.getDisplayInsets !== "function") {
+    return { notchInset: 0, hasNotch: false };
+  }
+  try {
+    const { screen: electronScreen } = require("electron");
+    const petBounds = ctx.getPetWindowBounds();
+    const cx = petBounds.x + petBounds.width / 2;
+    const cy = petBounds.y + petBounds.height / 2;
+    const display = electronScreen.getDisplayNearestPoint({ x: Math.round(cx), y: Math.round(cy) });
+    const notchInset = ctx.getDisplayInsets(display).top;
+    const hasNotch = notchInset >= NOTCH_INSET_THRESHOLD;
+    return { notchInset, hasNotch };
+  } catch {
+    return { notchInset: 0, hasNotch: false };
+  }
 }
 
 function repositionBubbles() {
@@ -376,19 +418,28 @@ function repositionBubbles() {
   const wa = ctx.getNearestWorkArea(cx, cy);
   const hitRect = ctx.bubbleFollowPet ? ctx.getHitRectScreen(petBounds) : null;
 
+  // Notch inset: the distance the workArea top is pushed down from the screen
+  // top edge (menu bar + notch on MacBooks). Used to position the bubble so
+  // its background visually merges with the notch while content stays below it.
+  const { notchInset, hasNotch } = detectNotch();
+  _currentNotchInset = notchInset;
+  _currentHasNotch = hasNotch;
+
   const bubbleHeights = pendingPermissions.map(perm =>
     perm.measuredHeight || estimateBubbleHeight((perm.suggestions || []).length)
   );
 
   const bounds = computeBubbleStackLayout({
     followPet: !!ctx.bubbleFollowPet,
-    preferTopDock: !!(isMac && ctx.bubbleFollowPet),
+    preferTopDock: !!(isMac && (ctx.bubbleFollowPet || hasNotch)),
     bubbleHeights,
     bubbleWidth: bw,
     margin,
     gap,
     workArea: wa,
     hitRect,
+    notchInset,
+    hasNotch,
   });
 
   for (let i = 0; i < pendingPermissions.length; i++) {
@@ -435,6 +486,15 @@ function showPermissionBubble(permEntry) {
 
   bub.loadFile(path.join(__dirname, "bubble.html"));
 
+  // Ensure notch state is computed before the first IPC send (which happens
+  // in did-finish-load). Without this, _currentNotchInset is 0 and the
+  // renderer doesn't get the correct notch geometry.
+  if (_currentNotchInset === 0 && isMac) {
+    const { notchInset, hasNotch } = detectNotch();
+    _currentNotchInset = notchInset;
+    _currentHasNotch = hasNotch;
+  }
+
   bub.webContents.once("did-finish-load", () => {
     // Session disambiguation: same as Sessions submenu (state.js:648-649) so the
     // bubble matches what the user sees in the right-click menu. Lets users tell
@@ -452,7 +512,10 @@ function showPermissionBubble(permEntry) {
       isElicitation: permEntry.isElicitation || false,
       isOpencode: permEntry.isOpencode || false,
       agentId: permEntry.agentId || "claude-code",
-      useTopDockChrome: !!(isMac && ctx.bubbleFollowPet),
+      useTopDockChrome: !!(isMac && (ctx.bubbleFollowPet || _currentHasNotch)),
+      notchInset: _currentNotchInset,
+      hasNotch: _currentHasNotch,
+      notchWidth: NOTCH_WIDTH,
       opencodeAlways: permEntry.opencodeAlwaysCandidates || [],
       opencodePatterns: permEntry.opencodePatterns || [],
       sessionFolder,

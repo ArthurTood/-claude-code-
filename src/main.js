@@ -663,6 +663,7 @@ const _permCtx = {
   getPetWindowBounds,
   getNearestWorkArea,
   getHitRectScreen,
+  getDisplayInsets,
   guardAlwaysOnTop,
   reapplyMacVisibility,
   isAgentPermissionsEnabled: (agentId) =>
